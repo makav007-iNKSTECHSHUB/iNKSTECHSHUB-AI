@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Mic, MicOff, ArrowUp, Copy, Check, Volume2, VolumeX, X, FileText, Sparkles, RefreshCw } from 'lucide-react';
 import { Logo } from './Logo';
+import { GoogleGenAI } from '@google/genai';
 
 interface AttachedFile {
   id: string;
   name: string;
   mimeType: string;
-  data: string; // base64
+  data: string;
   previewUrl?: string;
 }
 
@@ -24,24 +25,19 @@ export const MinimalistCanvas: React.FC = () => {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Voice states
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  
-  // UI states
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Auto-scroll to bottom on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Initialize Speech Recognition if supported
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -66,12 +62,10 @@ export const MinimalistCanvas: React.FC = () => {
     }
   }, []);
 
-  // Speak AI response if voice mode is active
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
 
-    // Strip code blocks and markdown symbols for natural speech
     const cleanSpeech = text
       .replace(/```[\s\S]*?```/g, 'Code block generated.')
       .replace(/[*#_`]/g, '')
@@ -116,7 +110,6 @@ export const MinimalistCanvas: React.FC = () => {
     }
   };
 
-  // Handle File Upload (+)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -146,7 +139,6 @@ export const MinimalistCanvas: React.FC = () => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  // Submit User Message
   const handleSend = async () => {
     if ((!inputText.trim() && attachedFiles.length === 0) || isLoading) return;
 
@@ -167,31 +159,27 @@ export const MinimalistCanvas: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const payloadFiles = currentFiles.map((f) => ({
-        mimeType: f.mimeType,
-        data: f.data
-      }));
-
-      const endpoint = '/api/ai/analyze';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: userMsgText,
-          files: payloadFiles,
-          language: 'en'
-        })
+      // Connect directly using the browser environment API key
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || (window as any).__ENV?.GEMINI_API_KEY });
+      
+      const contents: any[] = [userMsgText];
+      
+      currentFiles.forEach((file) => {
+        const base64Data = file.data.includes(',') ? file.data.split(',')[1] : file.data;
+        contents.push({
+          inlineData: {
+            mimeType: file.mimeType,
+            data: base64Data
+          }
+        });
       });
 
-      const rawText = await response.text();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: contents,
+      });
 
-      // Safe guard against HTML error pages triggering JSON crash
-      if (rawText.trim().startsWith('<') || !response.ok) {
-        throw new Error(`Server returned HTML error (${response.status}) at [${endpoint}]: ${rawText.substring(0, 100)}`);
-      }
-
-      const data = JSON.parse(rawText);
-      const aiText = data.response || 'No response generated from iNKSTECHSHUB AI.';
+      const aiText = response.text || 'No response generated from iNKSTECHSHUB AI.';
 
       const aiMessage: Message = {
         id: Math.random().toString(36).substring(2, 9),
@@ -209,7 +197,7 @@ export const MinimalistCanvas: React.FC = () => {
       const errorMessage: Message = {
         id: Math.random().toString(36).substring(2, 9),
         sender: 'ai',
-        text: `[iNKSTECHSHUB AI Connection Error]: ${err?.message || String(err)}`,
+        text: `[iNKSTECHSHUB AI Error]: ${err?.message || String(err)}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -233,7 +221,6 @@ export const MinimalistCanvas: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col font-mono selection:bg-white selection:text-black">
-      {/* Sleek Minimal Header */}
       <header className="border-b border-[#121212] bg-[#050505]/90 backdrop-blur-md sticky top-0 z-40 py-4 px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 bg-white p-0.5 rounded-full flex items-center justify-center overflow-hidden shrink-0 shadow-lg">
@@ -252,17 +239,14 @@ export const MinimalistCanvas: React.FC = () => {
           </div>
         </div>
 
-        {/* Status Indicator */}
         <div className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>Google GenAI Engine Active</span>
         </div>
       </header>
 
-      {/* Central Text Canvas Box */}
       <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 flex flex-col justify-between">
         {messages.length === 0 ? (
-          /* Central Pure Minimalist Welcome Canvas */
           <div className="my-auto text-center py-16 space-y-6">
             <div className="inline-flex h-20 w-20 bg-white p-1 rounded-full items-center justify-center shadow-2xl border border-[#222222] animate-pulse">
               <Logo size={72} />
@@ -293,7 +277,6 @@ export const MinimalistCanvas: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Active Message Stream */
           <div className="space-y-6 pb-28 pt-4">
             {messages.map((msg) => (
               <div
@@ -302,14 +285,12 @@ export const MinimalistCanvas: React.FC = () => {
                   msg.sender === 'user' ? 'items-end' : 'items-start'
                 }`}
               >
-                {/* Sender Header */}
                 <div className="flex items-center gap-2 text-[10px] text-zinc-500 tracking-widest uppercase">
                   <span>{msg.sender === 'user' ? 'Direct Prompt' : 'iNKSTECHSHUB AI'}</span>
                   <span>•</span>
                   <span>{msg.timestamp}</span>
                 </div>
 
-                {/* Attached File Thumbnails if user message */}
                 {msg.files && msg.files.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-1 justify-end">
                     {msg.files.map((file) => (
@@ -328,7 +309,6 @@ export const MinimalistCanvas: React.FC = () => {
                   </div>
                 )}
 
-                {/* Message Body */}
                 <div
                   className={`p-4 max-w-2xl text-xs leading-relaxed font-mono whitespace-pre-wrap ${
                     msg.sender === 'user'
@@ -339,7 +319,6 @@ export const MinimalistCanvas: React.FC = () => {
                   {msg.text}
                 </div>
 
-                {/* Action Buttons for AI Message */}
                 {msg.sender === 'ai' && (
                   <div className="flex items-center gap-2 pt-1">
                     <button
@@ -371,7 +350,6 @@ export const MinimalistCanvas: React.FC = () => {
               </div>
             ))}
 
-            {/* Loading Pulse */}
             {isLoading && (
               <div className="flex flex-col space-y-2 items-start">
                 <div className="flex items-center gap-2 text-[10px] text-zinc-500 tracking-widest uppercase">
@@ -391,7 +369,6 @@ export const MinimalistCanvas: React.FC = () => {
         )}
       </main>
 
-      {/* Hidden File Input Triggered by (+) Sign */}
       <input
         type="file"
         ref={fileInputRef}
@@ -400,10 +377,8 @@ export const MinimalistCanvas: React.FC = () => {
         className="hidden"
       />
 
-      {/* Low-Profile Bottom Input & Controls Dock (Exactly 3 Elements) */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#050505] via-[#050505]/95 to-transparent z-40">
         <div className="max-w-2xl mx-auto w-full space-y-2">
-          {/* File Attachment Previews Row */}
           {attachedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 p-2 bg-[#0c0c0c] border border-[#1a1a1a]">
               {attachedFiles.map((f) => (
@@ -428,9 +403,7 @@ export const MinimalistCanvas: React.FC = () => {
             </div>
           )}
 
-          {/* Unified Low-Profile Input Bar with Exactly Three Elements */}
           <div className="bg-[#0a0a0a] border border-[#222222] p-2 flex items-center gap-2 shadow-2xl transition-all focus-within:border-[#444444]">
-            {/* ELEMENT 1: Plus Sign (+) for Data Upload */}
             <button
               onClick={() => fileInputRef.current?.click()}
               title="Upload Data / Files (+)"
@@ -439,7 +412,6 @@ export const MinimalistCanvas: React.FC = () => {
               <Plus className="w-4 h-4" />
             </button>
 
-            {/* ELEMENT 2: Input / Enter Field */}
             <div className="flex-1 relative flex items-center">
               <textarea
                 rows={1}
@@ -459,7 +431,6 @@ export const MinimalistCanvas: React.FC = () => {
               </button>
             </div>
 
-            {/* ELEMENT 3: Voice Toggle */}
             <button
               onClick={toggleVoiceMode}
               title={isVoiceActive ? "Disable Voice Mode" : "Enable Voice Mode"}
@@ -479,7 +450,6 @@ export const MinimalistCanvas: React.FC = () => {
             </button>
           </div>
 
-          {/* Minimal Status Hint */}
           <div className="flex items-center justify-between text-[9px] font-mono text-zinc-600 px-1 uppercase tracking-wider">
             <span>[+] Upload Files • [Enter] Execute Prompt • [Mic] Voice Synthesis</span>
             {isSpeaking && (
