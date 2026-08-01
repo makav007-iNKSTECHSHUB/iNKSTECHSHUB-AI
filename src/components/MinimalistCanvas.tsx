@@ -172,7 +172,8 @@ export const MinimalistCanvas: React.FC = () => {
         data: f.data
       }));
 
-      const response = await fetch('/api/ai/analyze', {
+      const endpoint = '/api/ai/analyze';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,7 +183,14 @@ export const MinimalistCanvas: React.FC = () => {
         })
       });
 
-      const data = await response.json();
+      const rawText = await response.text();
+
+      // Safe guard against HTML error pages triggering JSON crash
+      if (rawText.trim().startsWith('<') || !response.ok) {
+        throw new Error(`Server returned HTML error (${response.status}) at [${endpoint}]: ${rawText.substring(0, 100)}`);
+      }
+
+      const data = JSON.parse(rawText);
       const aiText = data.response || 'No response generated from iNKSTECHSHUB AI.';
 
       const aiMessage: Message = {
